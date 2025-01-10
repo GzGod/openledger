@@ -1,0 +1,4 @@
+token:workerID:id:ownerAddress
+token:workerID:id:ownerAddress
+token:workerID:id:ownerAddress
+token:workerID:id:ownerAddress
