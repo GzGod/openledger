@@ -20,7 +20,7 @@ def display_header():
         "╔═╗╔═╦╗─╔╦═══╦═══╦═══╦═══╗",
         "╚╗╚╝╔╣║─║║╔══╣╔═╗║╔═╗║╔═╗║",
         "─╚╗╔╝║║─║║╚══╣║─╚╣║─║║║─║║",
-        "─╔╝╚╗║║─║║╔══╣╔═╣╚═╝║║─║║",
+        "─╔╝╚╗║║─║║╔══╣║╔═╣╚═╝║║─║║",
         "╔╝╔╗╚╣╚═╝║╚══╣╚╩═║╔═╗║╚═╝║",
         "╚═╝╚═╩═══╩═══╩═══╩╝─╚╩═══╝",
         "我的gihub：github.com/Gzgod",
@@ -57,6 +57,7 @@ def read_or_init_data_store() -> Dict[str, Dict]:
         print('未找到现有的数据存储，初始化新存储。')
     return data_store
 
+# GPU列表
 gpu_list = [
     "NVIDIA GTX 1050",
     "NVIDIA GTX 1050 Ti",
@@ -88,7 +89,7 @@ gpu_list = [
     "AMD Radeon RX 460",
     "AMD Radeon RX 470",
     "AMD Radeon RX 480",
-        "AMD Radeon RX 550",
+    "AMD Radeon RX 550",
     "AMD Radeon RX 560",
     "AMD Radeon RX 570",
     "AMD Radeon RX 580",
@@ -201,9 +202,210 @@ async def get_account_id(address, index, use_proxy, proxies, delay=60000):
             await asyncio.sleep(delay / 1000)
             attempt += 1
 
-# 其余函数保持不变
-# 以下是之前已有的函数
+# WebSocket连接
+async def connect_websocket(address, index, use_proxy, proxies):
+    data_store = read_or_init_data_store()
+    if address not in data_store or 'token' not in data_store[address]:
+        print(f"Error: No token found for address {address}")
+        return
 
+    token = data_store[address]['token']
+    workerID = data_store[address]['workerID']
+    id = data_store[address]['id']
+
+    ws_url = f"wss://apitn.openledger.xyz/ws/v1/orch?authToken={token}"
+    proxy = proxies[index % len(proxies)] if use_proxy and proxies else None
+    
+    while True:
+        try:
+            if proxy:
+                proxy_parts = proxy.split('@')
+                if len(proxy_parts) == 2:
+                    proxy_user_pass, proxy_host_port = proxy_parts
+                    proxy_user, proxy_pass = proxy_user_pass.split(':')
+                    proxy_host, proxy_port = proxy_host_port.split(':')
+                    ws = create_connection(ws_url, proxy_type='http', http_proxy_host=proxy_host, 
+                                           http_proxy_port=int(proxy_port), http_proxy_auth=(proxy_user, proxy_pass))
+                else:
+                    print(f"代理格式未识别，索引 {index}: {proxy}")
+                    await asyncio.sleep(30)
+                    continue
+            else:
+                ws = create_connection(ws_url)
+
+            browser_id = str(uuid4())
+            connection_uuid = str(uuid4())
+
+            print(f"\033[33m[{index + 1}]\033[0m 已连接到 workerID: \033[33m{workerID}\033[0m 的 WebSocket，代理: \033[36m{proxy or 'False'}\033[0m")
+
+            # 注册消息
+            register_message = {
+                'workerID': workerID,
+                'msgType': 'REGISTER',
+                'workerType': 'LWEXT',
+                'message': {
+                    'id': id,
+                    'type': 'REGISTER',
+                    'worker': {
+                        'host': 'chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc',
+                        'identity': workerID,
+                        'ownerAddress': address,
+                        'type': 'LWEXT'
+                    }
+                }
+            }
+            ws.send(json.dumps(register_message))
+
+            # 发送心跳
+            while True:
+                # 获取最新的账户详细信息
+                await get_account_details(token, index, use_proxy, proxies, account_ids[token], retries=1, delay=0)
+
+                # 使用全局变量来获取最新数据
+                heartbeat_message = {
+                    'message': {
+                        'Worker': {
+                            'Identity': workerID,
+                            'ownerAddress': address,
+                            'type': 'LWEXT',
+                            'Host': 'chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc'
+                        },
+                        'Capacity': {
+                            'AvailableMemory': round(random.uniform(0, 32), 2),
+                            'AvailableStorage': get_or_assign_resources(address, data_store)['storage'],
+                            'AvailableGPU': get_or_assign_resources(address, data_store)['gpu'],
+                            'AvailableModels': []
+                        },
+                        'TotalHeartbeats': total_heartbeats,
+                        'TotalPoints': total_points
+                    },
+                    'msgType': 'HEARTBEAT',
+                    'workerType': 'LWEXT',
+                    'workerID': workerID
+                }
+                
+                print(f"\033[33m[{index + 1}]\033[0m 正在发送 workerID: \033[33m{workerID}\033[0m 的心跳，代理: \033[36m{proxy or 'False'}\033[0m")
+                ws.send(json.dumps(heartbeat_message))
+                await asyncio.sleep(30)  # 每30秒发送一次心跳
+        except Exception as e:
+            print(f"\033[33m[{index + 1}]\033[0m workerID \033[33m{workerID}\033[0m 的 WebSocket 错误：{str(e)}")
+            if 'ws' in locals() and ws:
+                ws.close()
+            print(f"\033[33m[{index + 1}]\033[0m workerID \033[33m{workerID}\033[0m 的 WebSocket 连接已关闭，代理: \033[36m{proxy or 'False'}\033[0m")
+            await asyncio.sleep(30)
+        finally:
+            if 'ws' in locals() and ws:
+                ws.close()
+
+# 检查并领取奖励
+async def check_and_claim_rewards_periodically(use_proxy, wallets, proxies):
+    while True:
+        tasks = [asyncio.create_task(check_and_claim_reward(data_store[address]['token'], address, index, use_proxy, proxies)) for index, address in enumerate(wallets)]
+        await asyncio.gather(*tasks)
+        await asyncio.sleep(12 * 60 * 60)  # 每12小时检查一次
+
+async def check_and_claim_reward(token, address, index, use_proxy, proxies, retries=3, delay=60000):
+    url = 'https://rewardstn.openledger.xyz/api/v1/claim_details'
+    claim_url = 'https://rewardstn.openledger.xyz/api/v1/claim_reward'
+    headers = {'Authorization': f'Bearer {token}'}
+    proxy = proxies[index % len(proxies)] if use_proxy and proxies else None
+
+    for attempt in range(1, retries + 1):
+        try:
+            if proxy:
+                proxy_components = proxy.split('@')
+                if len(proxy_components) == 2:
+                    user_pass, host_port = proxy_components
+                    user, password = user_pass.split(':')
+                    host, port = host_port.split(':')
+                    proxies_dict = {'https': f'http://{user}:{password}@{host}:{port}'}
+                    claim_details_response = requests.get(url, headers=headers, proxies=proxies_dict, timeout=10)
+                else:
+                    claim_details_response = requests.get(url, headers=headers, proxies={'https': f'http://{proxy}'}, timeout=10)
+            else:
+                claim_details_response = requests.get(url, headers=headers, timeout=10)
+            
+            claim_details_response.raise_for_status()
+            claimed = claim_details_response.json()['data']['claimed']
+
+            if not claimed:
+                if proxy:
+                    claim_reward_response = requests.get(claim_url, headers=headers, proxies=proxies_dict, timeout=10)
+                else:
+                    claim_reward_response = requests.get(claim_url, headers=headers, timeout=10)
+                
+                claim_reward_response.raise_for_status()
+                if claim_reward_response.json()['status'] == 'SUCCESS':
+                    print(f"\033[33m[{index + 1}]\033[0m 账户ID \033[36m{account_ids[token]}\033[0m \033[32m成功领取每日奖励！\033[0m")
+            return
+        except requests.RequestException as e:
+            print(f"领取地址 {address} 的奖励时出错，尝试 {attempt}: {str(e)}")
+            if attempt < retries:
+                print(f"在 {delay / 1000} 秒后重试...")
+                await asyncio.sleep(delay / 1000)
+            else:
+                print(f"所有重试尝试都失败了。")
+
+# 获取账号详细信息
+async def get_account_details(token, index, use_proxy, proxies, account_id, retries=3, delay=60000):
+    urls = [
+        'https://rewardstn.openledger.xyz/api/v1/reward_realtime',
+        'https://rewardstn.openledger.xyz/api/v1/reward_history',
+        'https://rewardstn.openledger.xyz/api/v1/reward'
+    ]
+    headers = {'Authorization': f'Bearer {token}'}
+    proxy = proxies[index % len(proxies)] if use_proxy and proxies else None
+    proxy_text = proxy or 'False'
+
+    for attempt in range(1, retries + 1):
+        try:
+            if proxy:
+                proxy_components = proxy.split('@')
+                if len(proxy_components) == 2:
+                    user_pass, host_port = proxy_components
+                    user, password = user_pass.split(':')
+                    host, port = host_port.split(':')
+                    proxies_dict = {'https': f'http://{user}:{password}@{host}:{port}'}
+                else:
+                    proxies_dict = {'https': f'http://{proxy}'}
+            else:
+                proxies_dict = None
+
+            for url in urls:
+                if proxies_dict:
+                    response = requests.get(url, headers=headers, proxies=proxies_dict, timeout=10)
+                else:
+                    response = requests.get(url, headers=headers, timeout=10)
+                
+                response.raise_for_status()
+                data = response.json()['data']
+
+                if url == 'https://rewardstn.openledger.xyz/api/v1/reward_realtime':
+                    print(f"\033[33m[{index + 1}]\033[0m 账户ID \033[36m{account_id}\033[0m 的实时奖励信息：")
+                    print(f"    当前积分: \033[32m{data['points']}\033[0m")
+                elif url == 'https://rewardstn.openledger.xyz/api/v1/reward_history':
+                    print(f"\033[33m[{index + 1}]\033[0m 账户ID \033[36m{account_id}\033[0m 的奖励历史：")
+                    for reward in data['history'][:5]:  # 只显示最近5条历史记录
+                        print(f"    时间: \033[36m{reward['timestamp']}\033[0m, 类型: \033[36m{reward['type']}\033[0m, 数量: \033[32m{reward['amount']}\033[0m")
+                elif url == 'https://rewardstn.openledger.xyz/api/v1/reward':
+                    print(f"\033[33m[{index + 1}]\033[0m 账户ID \033[36m{account_id}\033[0m 的总奖励信息：")
+                    print(f"    总积分: \033[32m{data['totalPoints']}\033[0m")
+                    print(f"    总心跳次数: \033[32m{data['totalHeartbeats']}\033[0m")
+
+            # 更新全局变量
+            global total_heartbeats, total_points
+            total_heartbeats = data['totalHeartbeats']
+            total_points = data['totalPoints']
+
+            return
+        except requests.RequestException as e:
+            print(f"获取账户ID {account_id} 的详细信息时出错，尝试 {attempt}: {str(e)}")
+            if attempt < retries:
+                print(f"在 {delay / 1000} 秒后重试...")
+                await asyncio.sleep(delay / 1000)
+            else:
+                print(f"获取账户ID {account_id} 的详细信息失败，尝试次数已用尽。")
+                return
 # 主函数
 async def main():
     display_header()
