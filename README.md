@@ -27,13 +27,13 @@ Openledger Bot 是一个简单的工具，旨在自动化节点交互。
 
 1. 在运行脚本之前，设置 `account.txt` 和 `proxy.txt`（可选是否使用代理）。
 
-   `account.txt` 文件格式：
+   `account.txt` 文件格式（最新版本不需要，只需要把钱包地址填入wallets.txt即可）：
    ```
    token1:workerID1:id1:ownerAddress1
    token2:workerID2:id2:ownerAddress2
    ```
    
-   获取 `Token`、`WorkerID`、`id` 和 `ownerAddress`，教程如下：
+   （最新版本不需要此步骤 跳过即可）获取 `Token`、`WorkerID`、`id` 和 `ownerAddress`，教程如下：
    - 首先注册账户，您可以 [点击这里注册](https://testnet.openledger.xyz/?referral_code=ly6qkqged4)
    - 下载 [扩展程序](https://chromewebstore.google.com/detail/teneo-community-node/emcclcoaglgcpoognfiggmhnhgabppkm)
    - 打开扩展程序，在插件页面右键点击并选择 `检查` 注意先不要登录
