@@ -214,11 +214,13 @@ async def connect_websocket(address, index, use_proxy, proxies):
     id = data_store[address]['id']
 
     ws_url = f"wss://apitn.openledger.xyz/ws/v1/orch?authToken={token}"
-    proxy = proxies[index % len(proxies)] if use_proxy and proxies else None
+    # 修正代理获取方式
+    proxy = proxies[index] if use_proxy and proxies else None
     
     while True:
         try:
             if proxy:
+                # 确保这里的 proxy 是正确的格式
                 proxy_parts = proxy.split('@')
                 if len(proxy_parts) == 2:
                     proxy_user_pass, proxy_host_port = proxy_parts
