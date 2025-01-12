@@ -10,7 +10,8 @@ import base64
 
 # 全局变量用于存储最新信息
 total_heartbeats = 0
-total_points = 0import os
+total_points = 0
+import os
 import json
 import random
 import asyncio
