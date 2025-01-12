@@ -216,11 +216,98 @@ async def get_account_id(address, index, use_proxy, proxies):
 
 # 获取账号详细信息
 async def get_account_details(token, index, use_proxy, proxies, account_id, retries=3, delay=60000):
-    # ... (保持不变)
+    urls = [
+        'https://rewardstn.openledger.xyz/api/v1/reward_realtime',
+        'https://rewardstn.openledger.xyz/api/v1/reward_history',
+        'https://rewardstn.openledger.xyz/api/v1/reward'
+    ]
+    headers = {'Authorization': f'Bearer {token}'}
+    proxy = proxies[index] if use_proxy else None
+    proxy_text = proxy or 'False'
+
+    for attempt in range(1, retries + 1):
+        try:
+            if proxy:
+                proxy_components = proxy.split('@')
+                if len(proxy_components) == 2:
+                    user_pass, host_port = proxy_components
+                    user, password = user_pass.split(':')
+                    host, port = host_port.split(':')
+                    proxies_dict = {'https': f'http://{user}:{password}@{host}:{port}'}
+                    response_realtime = requests.get(urls[0], headers=headers, proxies=proxies_dict, timeout=10)
+                    response_history = requests.get(urls[1], headers=headers, proxies=proxies_dict, timeout=10)
+                    response_reward = requests.get(urls[2], headers=headers, proxies=proxies_dict, timeout=10)
+                else:
+                    response_realtime = requests.get(urls[0], headers=headers, proxies={'https': f'http://{proxy}'}, timeout=10)
+                    response_history = requests.get(urls[1], headers=headers, proxies={'https': f'http://{proxy}'}, timeout=10)
+                    response_reward = requests.get(urls[2], headers=headers, proxies={'https': f'http://{proxy}'}, timeout=10)
+            else:
+                response_realtime = requests.get(urls[0], headers=headers, timeout=10)
+                response_history = requests.get(urls[1], headers=headers, timeout=10)
+                response_reward = requests.get(urls[2], headers=headers, timeout=10)
+            
+            response_realtime.raise_for_status()
+            response_history.raise_for_status()
+            response_reward.raise_for_status()
+            
+            global total_heartbeats, total_points
+            total_heartbeats = int(response_realtime.json()['data'][0]['total_heartbeats'])
+            total_points = int(response_history.json()['data'][0]['total_points']) + float(response_reward.json()['data']['totalPoint'])
+            epoch_name = response_reward.json()['data']['name']
+
+            print(f"\033[33m[{index + 1}]\033[0m 账户ID \033[36m{account_id}\033[0m, 总心跳数 \033[32m{total_heartbeats}\033[0m, 总积分 \033[32m{total_points:.2f}\033[0m (\033[33m{epoch_name}\033[0m), 代理: \033[36m{proxy_text}\033[0m")
+            return
+        except requests.RequestException as e:
+            print(f"获取 token 索引 {index} 的账户详细信息时出错，尝试 {attempt}: {str(e)}")
+            if attempt < retries:
+                print(f"在 {delay / 1000} 秒后重试...")
+                await asyncio.sleep(delay / 1000)
+            else:
+                print(f"所有重试尝试失败。")
+
 
 # 检查并领取奖励
 async def check_and_claim_reward(token, index, use_proxy, proxies, retries=3, delay=60000):
-    # ... (保持不变)
+    url = 'https://rewardstn.openledger.xyz/api/v1/claim_details'
+    claim_url = 'https://rewardstn.openledger.xyz/api/v1/claim_reward'
+    headers = {'Authorization': f'Bearer {token}'}
+    proxy = proxies[index] if use_proxy else None
+
+    for attempt in range(1, retries + 1):
+        try:
+            if proxy:
+                proxy_components = proxy.split('@')
+                if len(proxy_components) == 2:
+                    user_pass, host_port = proxy_components
+                    user, password = user_pass.split(':')
+                    host, port = host_port.split(':')
+                    proxies_dict = {'https': f'http://{user}:{password}@{host}:{port}'}
+                    claim_details_response = requests.get(url, headers=headers, proxies=proxies_dict, timeout=10)
+                else:
+                    claim_details_response = requests.get(url, headers=headers, proxies={'https': f'http://{proxy}'}, timeout=10)
+            else:
+                claim_details_response = requests.get(url, headers=headers, timeout=10)
+            
+            claim_details_response.raise_for_status()
+            claimed = claim_details_response.json()['data']['claimed']
+
+            if not claimed:
+                if proxy:
+                    claim_reward_response = requests.get(claim_url, headers=headers, proxies=proxies_dict, timeout=10)
+                else:
+                    claim_reward_response = requests.get(claim_url, headers=headers, timeout=10)
+                
+                claim_reward_response.raise_for_status()
+                if claim_reward_response.json()['status'] == 'SUCCESS':
+                    print(f"\033[33m[{index + 1}]\033[0m 账户ID \033[36m{account_ids[token]}\033[0m \033[32m成功领取每日奖励！\033[0m")
+            return
+        except requests.RequestException as e:
+            print(f"领取 token 索引 {index} 的奖励时出错，尝试 {attempt}: {str(e)}")
+            if attempt < retries:
+                print(f"在 {delay / 1000} 秒后重试...")
+                await asyncio.sleep(delay / 1000)
+            else:
+                print(f"所有重试尝试失败。")
 
 # 定期检查和领取奖励
 async def check_and_claim_rewards_periodically(use_proxy, wallets, proxies):
