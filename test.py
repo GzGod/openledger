@@ -237,20 +237,40 @@ async def get_account_details(token, index, use_proxy, proxies, account_id, retr
             response_history.raise_for_status()
             response_reward.raise_for_status()
             
-            global total_heartbeats, total_points
-            total_heartbeats = int(response_realtime.json()['data'][0]['total_heartbeats'])
-            total_points = int(response_history.json()['data'][0]['total_points']) + float(response_reward.json()['data']['totalPoint'])
-            epoch_name = response_reward.json()['data']['name']
+            # 错误检查
+            realtime_data = response_realtime.json().get('data', [])
+            history_data = response_history.json().get('data', [])
+            reward_data = response_reward.json().get('data', {})
 
-            print(f"\033[33m[{index + 1}]\033[0m 账户ID \033[36m{account_id}\033[0m, 总心跳数 \033[32m{total_heartbeats}\033[0m, 总积分 \033[32m{total_points:.2f}\033[0m (\033[33m{epoch_name}\033[0m), 代理: \033[36m{proxy_text}\033[0m")
-            return
-        except requests.RequestException as e:
-            print(f"获取 token 索引 {index} 的账户详细信息时出错，尝试 {attempt}: {str(e)}")
-            if attempt < retries:
-                print(f"在 {delay / 1000} 秒后重试...")
-                await asyncio.sleep(delay / 1000)
-            else:
-                print(f"所有重试尝试失败。")
+                            # 确保数据存在再进行操作
+                if realtime_data and isinstance(realtime_data, list) and len(realtime_data) > 0:
+                    global total_heartbeats
+                    total_heartbeats = int(realtime_data[0].get('total_heartbeats', 0))
+                else:
+                    print(f"\033[33m[{index + 1}]\033[0m 警告：无法获取实时奖励数据。")
+
+                if history_data and isinstance(history_data, list) and len(history_data) > 0:
+                    global total_points
+                    total_points = int(history_data[0].get('total_points', 0))
+                else:
+                    print(f"\033[33m[{index + 1}]\033[0m 警告：无法获取奖励历史数据。")
+
+                if reward_data:
+                    total_points += float(reward_data.get('totalPoint', 0))
+                    epoch_name = reward_data.get('name', '未知')
+                else:
+                    print(f"\033[33m[{index + 1}]\033[0m 警告：无法获取总奖励数据。")
+                    epoch_name = '未知'
+
+                print(f"\033[33m[{index + 1}]\033[0m 账户ID \033[36m{account_id}\033[0m, 总心跳数 \033[32m{total_heartbeats}\033[0m, 总积分 \033[32m{total_points:.2f}\033[0m (\033[33m{epoch_name}\033[0m), 代理: \033[36m{proxy_text}\033[0m")
+                return
+            except requests.RequestException as e:
+                print(f"获取 token 索引 {index} 的账户详细信息时出错，尝试 {attempt}: {str(e)}")
+                if attempt < retries:
+                    print(f"在 {delay / 1000} 秒后重试...")
+                    await asyncio.sleep(delay / 1000)
+                else:
+                    print(f"所有重试尝试失败。")
 
 # 检查并领取奖励
 async def check_and_claim_reward(token, index, use_proxy, proxies, retries=3, delay=60000):
